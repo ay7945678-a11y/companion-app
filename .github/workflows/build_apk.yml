@@ -17,9 +17,14 @@ jobs:
         with:
           flutter-version: '3.19.x'
 
-      - name: Create Android Folders
+      - name: Rebuild Clean Project
         run: |
-          flutter create . --force
+          mkdir temp_app
+          cd temp_app
+          flutter create companion_app
+          cp -r companion_app/android ../
+          cd ..
+          rm -rf temp_app
 
       - name: Get Dependencies
         run: flutter pub get
