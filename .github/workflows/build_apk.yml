@@ -32,6 +32,12 @@ jobs:
           cd ..
           rm -rf temp_app
 
+      - name: Add Permissions to AndroidManifest.xml
+        run: |
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          PERMISSIONS="<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\"/>\n<uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\"/>\n<uses-permission android:name=\"android.permission.READ_MEDIA_IMAGES\"/>\n<uses-permission android:name=\"android.permission.CAMERA\"/>"
+          sed -i "/<manifest/a $PERMISSIONS" $MANIFEST_PATH
+
       - name: Set Android SDK Version in Gradle
         run: |
           sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/g' android/app/build.gradle || true
