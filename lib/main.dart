@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 void main() {
@@ -23,7 +25,7 @@ class PartnerApp extends StatelessWidget {
 }
 
 // -------------------------------------------------------------
-// MAIN NAVIGATION (नीचे के नेविगेशन टैब्स)
+// MAIN NAVIGATION (सीरियल-वाइज़ नेविगेशन)
 // -------------------------------------------------------------
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({Key? key}) : super(key: key);
@@ -33,14 +35,31 @@ class MainNavigationScreen extends StatefulWidget {
 }
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
-  int _currentIndex = 0;
+  int _currentIndex = 0; // डिफॉल्ट सबसे पहले KYC टैब पर खुलेगा
+  bool isKycApproved = false; // KYC का स्टेटस
 
-  final List<Widget> _screens = [
-    const HomeScreen(),
-    const BookingScreen(),
-    const KycVerificationScreen(),
-    const ProfileScreen(),
-  ];
+  // सीरियल: 1. KYC -> 2. एक्सप्लोर -> 3. बुकिंग्स -> 4. प्रोफाइल
+  late List<Widget> _screens;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateScreens();
+  }
+
+  void _updateScreens() {
+    _screens = [
+      KycVerificationScreen(onKycSubmitted: () {
+        setState(() {
+          isKycApproved = true;
+          _updateScreens();
+        });
+      }),
+      HomeScreen(isKycDone: isKycApproved),
+      const BookingScreen(),
+      const ProfileScreen(),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,10 +76,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           });
         },
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.explore), label: 'एक्सप्लोर'),
-          BottomNavigationBarItem(icon: Icon(Icons.calendar_month), label: 'बुकिंग'),
-          BottomNavigationBarItem(icon: Icon(Icons.verified_user), label: 'KYC'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'प्रोफाइल'),
+          BottomNavigationBarItem(icon: Icon(Icons.verified_user), label: '1. KYC'),
+          BottomNavigationBarItem(icon: Icon(Icons.explore), label: '2. एक्सप्लोर'),
+          BottomNavigationBarItem(icon: Icon(Icons.calendar_month), label: '3. बुकिंग'),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: '4. प्रोफाइल'),
         ],
       ),
     );
@@ -68,61 +87,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 }
 
 // -------------------------------------------------------------
-// 1. HOME & LISTING SCREEN (साथी खोजना)
-// -------------------------------------------------------------
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Companion Finder'),
-        backgroundColor: Colors.indigo,
-      ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(12),
-        itemCount: 5,
-        itemBuilder: (context, index) {
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: ListTile(
-              leading: const CircleAvatar(
-                radius: 25,
-                backgroundColor: Colors.indigoAccent,
-                child: Icon(Icons.person, color: Colors.white),
-              ),
-              title: Text('Companion Profile #${index + 1}', style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: const Text('Verified User • ₹500/घंटा'),
-              trailing: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const PaymentAndBookingScreen(
-                        amount: 500.0,
-                        bookingId: 'BK1001',
-                      ),
-                    ),
-                  );
-                },
-                child: const Text('बुक करें', style: TextStyle(color: Colors.white)),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-// -------------------------------------------------------------
-// 2. KYC VERIFICATION SCREEN (आधार, पैन, DL, वोटर ID)
+// STEP 1: KYC VERIFICATION SCREEN (सबसे पहला स्टेप)
 // -------------------------------------------------------------
 class KycVerificationScreen extends StatefulWidget {
-  const KycVerificationScreen({Key? key}) : super(key: key);
+  final VoidCallback onKycSubmitted;
+  const KycVerificationScreen({Key? key, required this.onKycSubmitted}) : super(key: key);
 
   @override
   State<KycVerificationScreen> createState() => _KycVerificationScreenState();
@@ -131,6 +100,9 @@ class KycVerificationScreen extends StatefulWidget {
 class _KycVerificationScreenState extends State<KycVerificationScreen> {
   String _selectedDoc = 'Aadhaar Card';
   bool _isSubmitted = false;
+  File? _selectedImage;
+
+  final ImagePicker _picker = ImagePicker();
 
   final List<String> _docTypes = [
     'Aadhaar Card',
@@ -139,14 +111,65 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
     'Voter ID'
   ];
 
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? pickedFile = await _picker.pickImage(
+        source: source,
+        imageQuality: 80,
+      );
+      if (pickedFile != null) {
+        setState(() {
+          _selectedImage = File(pickedFile.path);
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('इमेज चुनने में समस्या: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  void _showImagePickerModal() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(15)),
+      ),
+      builder: (BuildContext context) {
+        return SafeArea(
+          child: Wrap(
+            children: <Widget>[
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: Colors.indigo),
+                title: const Text('गैलरी से चुनें'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_camera, color: Colors.indigo),
+                title: const Text('कैमरा से फोटो खींचें'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('KYC वेरिफिकेशन'),
+        title: const Text('स्टेप 1: KYC वेरिफिकेशन'),
         backgroundColor: Colors.indigo,
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -172,49 +195,92 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
               },
             ),
             const SizedBox(height: 20),
+            
             InkWell(
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('फोटो सेलेक्ट करने का ऑप्शन खुला')),
-                );
-              },
+              onTap: _showImagePickerModal,
               child: Container(
-                height: 150,
+                height: 180,
                 width: double.infinity,
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.indigo, style: BorderStyle.solid),
+                  border: Border.all(
+                    color: _selectedImage != null ? Colors.green : Colors.indigo,
+                    width: 2,
+                  ),
                   borderRadius: BorderRadius.circular(10),
                   color: Colors.indigo.withOpacity(0.05),
                 ),
-                child: const Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.cloud_upload, size: 50, color: Colors.indigo),
-                    SizedBox(height: 8),
-                    Text('डॉक्यूमेंट की फोटो (Front & Back) अपलोड करें'),
-                  ],
-                ),
+                child: _selectedImage != null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.file(
+                          _selectedImage!,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                        ),
+                      )
+                    : const Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.cloud_upload, size: 50, color: Colors.indigo),
+                          SizedBox(height: 8),
+                          Text('डॉक्यूमेंट की फोटो (Front & Back) अपलोड करें'),
+                          SizedBox(height: 4),
+                          Text('(टैप करके गैलरी/कैमरा से चुनें)', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        ],
+                      ),
               ),
             ),
+            
+            if (_selectedImage != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _selectedImage = null;
+                    });
+                  },
+                  icon: const Icon(Icons.delete, color: Colors.red, size: 18),
+                  label: const Text('फोटो हटाएं', style: TextStyle(color: Colors.red)),
+                ),
+              ),
+
             const SizedBox(height: 30),
+            
             SizedBox(
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
-                onPressed: () {
-                  setState(() {
-                    _isSubmitted = true;
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('KYC डॉक्यूमेंट सफलता पूर्वक जमा हुए! वेरिफिकेशन चालू है।'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _isSubmitted ? Colors.green : Colors.indigo,
+                ),
+                onPressed: _isSubmitted
+                    ? null
+                    : () {
+                        if (_selectedImage == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('⚠️ कृपया पहले डॉक्यूमेंट की फोटो अपलोड करें!'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                          return;
+                        }
+
+                        setState(() {
+                          _isSubmitted = true;
+                        });
+                        widget.onKycSubmitted();
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('✅ KYC जमा हुआ! अब आप एक्सप्लोर करके बुकिंग कर सकते हैं।'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      },
                 child: Text(
-                  _isSubmitted ? 'KYC सबमिट हो गया (Pending)' : 'KYC सबमिट करें',
+                  _isSubmitted ? 'KYC सबमिट हो गया (Pending Verification)' : 'KYC सबमिट करें',
                   style: const TextStyle(fontSize: 16, color: Colors.white),
                 ),
               ),
@@ -227,7 +293,69 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
 }
 
 // -------------------------------------------------------------
-// 3. BOOKING & RAZORPAY PAYMENT SCREEN (पेमेंट गेटवे)
+// STEP 2: HOME & LISTING SCREEN (एक्सप्लोर साथी)
+// -------------------------------------------------------------
+class HomeScreen extends StatelessWidget {
+  final bool isKycDone;
+  const HomeScreen({Key? key, required this.isKycDone}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('स्टेप 2: Companion Finder'),
+        backgroundColor: Colors.indigo,
+      ),
+      body: ListView.builder(
+        padding: const EdgeInsets.all(12),
+        itemCount: 5,
+        itemBuilder: (context, index) {
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: ListTile(
+              leading: const CircleAvatar(
+                radius: 25,
+                backgroundColor: Colors.indigoAccent,
+                child: Icon(Icons.person, color: Colors.white),
+              ),
+              title: Text('Companion Profile #${index + 1}', style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: const Text('Verified User • ₹500/घंटा'),
+              trailing: ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
+                onPressed: () {
+                  if (!isKycDone) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('⚠️ बुकिंग के लिए पहले KYC पूरा करना अनिवार्य है!'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                    return;
+                  }
+
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const PaymentAndBookingScreen(
+                        amount: 500.0,
+                        bookingId: 'BK1001',
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('बुक करें', style: TextStyle(color: Colors.white)),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// -------------------------------------------------------------
+// STEP 3: BOOKING & RAZORPAY PAYMENT SCREEN (अंतिम स्टेप)
 // -------------------------------------------------------------
 class PaymentAndBookingScreen extends StatefulWidget {
   final double amount;
@@ -245,8 +373,6 @@ class PaymentAndBookingScreen extends StatefulWidget {
 
 class _PaymentAndBookingScreenState extends State<PaymentAndBookingScreen> {
   late Razorpay _razorpay;
-
-  // आपकी Razorpay Test Key
   static const String _razorpayKey = 'rzp_test_TIYKekAWrpcZBR';
 
   @override
@@ -294,7 +420,7 @@ class _PaymentAndBookingScreenState extends State<PaymentAndBookingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('कन्फर्म बुकिंग & पेमेंट'), backgroundColor: Colors.indigo),
+      appBar: AppBar(title: const Text('स्टेप 3: कन्फर्म बुकिंग & पेमेंट'), backgroundColor: Colors.indigo),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(20.0),
@@ -321,7 +447,7 @@ class _PaymentAndBookingScreenState extends State<PaymentAndBookingScreen> {
 }
 
 // -------------------------------------------------------------
-// 4. BOOKINGS LIST SCREEN
+// BOOKINGS LIST & PROFILE
 // -------------------------------------------------------------
 class BookingScreen extends StatelessWidget {
   const BookingScreen({Key? key}) : super(key: key);
@@ -335,9 +461,6 @@ class BookingScreen extends StatelessWidget {
   }
 }
 
-// -------------------------------------------------------------
-// 5. USER PROFILE SCREEN
-// -------------------------------------------------------------
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({Key? key}) : super(key: key);
 
